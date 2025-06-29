@@ -9,12 +9,10 @@ import time
 
 # --- Configuration ---
 LOG_FILE = "websinu_agent.log"
-# GRADES_FILE will be dynamically determined per user (e.g., previous_grades_USER1.json)
-DELAY_BETWEEN_USERS_SECONDS = 5 # Small delay to avoid overwhelming the server
+DELAY_BETWEEN_USERS_SECONDS = 5
 # --- End Configuration ---
 
 def log_message(message, level="INFO"):
-    """Appends a timestamped message to the log file and prints to console."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log_entry = f"[{timestamp}] [{level}] {message}\n"
     with open(LOG_FILE, "a", encoding="utf-8") as f:
@@ -23,9 +21,6 @@ def log_message(message, level="INFO"):
 
 
 def send_ntfy_notification(global_ntfy_topic_url, message, title="WebSinu Grades Update", tags=None):
-    """
-    Sends a notification to an Ntfy topic.
-    """
     if not global_ntfy_topic_url:
         log_message("Ntfy topic URL is not configured. Cannot send notification.", level="WARNING")
         return
@@ -50,10 +45,6 @@ def login_websinu(username, password):
     """
     Logs into the WebSinu account and returns a requests Session object,
     the 'sid' value, and the HTML content of the grades selection page if successful.
-
-    Returns:
-        tuple: (requests.Session, str, str) if login is successful,
-               otherwise (None, None, None).
     """
     login_url = "https://websinu.utcluj.ro/note/default.asp"
     roluri_url = "https://websinu.utcluj.ro/note/roluri.asp"
@@ -148,10 +139,6 @@ def get_grades(session, initial_sid, initial_grades_page_html):
     Parses the initial grades selection page HTML to extract necessary data,
     triggers the grade display with a POST request using the initial_sid,
     parses the HTML for grades, and returns them.
-
-    Returns:
-        list of dict: A list of dictionaries, each representing a grade entry,
-                      or an empty list if no grades are found or an error occurs.
     """
     grades_post_url = "https://websinu.utcluj.ro/note/roluri.asp"
 
@@ -172,7 +159,6 @@ def get_grades(session, initial_sid, initial_grades_page_html):
 
         if view_notes_link:
             js_call = view_notes_link['href']
-            # This regex extracts the two string arguments from the JS function call
             match = re.search(r"NoteSesiuneaCurenta\('(.*?)',\s*'(.*?)'\)", js_call)
             if match:
                 faculty_name = match.group(1).strip()
@@ -190,8 +176,8 @@ def get_grades(session, initial_sid, initial_grades_page_html):
             'hidSelfSubmit': 'roluri.asp',
             'sid': sid_to_use,
             'hidOperation': 'N',
-            'hidNume_Facultate': faculty_name,      # Using the dynamically extracted name
-            'hidNume_Specializare': specialization_name # Using the dynamically extracted name
+            'hidNume_Facultate': faculty_name,
+            'hidNume_Specializare': specialization_name
         }
 
         log_message("Sending POST request to display grades...")
@@ -204,8 +190,7 @@ def get_grades(session, initial_sid, initial_grades_page_html):
 
         soup_grades = BeautifulSoup(grades_response.text, 'html.parser')
 
-        grades_list = []
-
+        raw_grades_list = [] # Store all raw entries, including duplicates for now
         for tr in soup_grades.find_all('tr'):
             tds = tr.find_all('td', recursive=False)
             if len(tds) == 6:
@@ -219,7 +204,7 @@ def get_grades(session, initial_sid, initial_grades_page_html):
                         date = tds[4].get_text(strip=True)
                         grade_value = tds[5].get_text(strip=True)
 
-                        grades_list.append({
+                        raw_grades_list.append({
                             'year': year,
                             'semester': semester,
                             'subject': subject,
@@ -230,9 +215,31 @@ def get_grades(session, initial_sid, initial_grades_page_html):
                     except IndexError:
                         log_message(f"Skipping malformed row (fewer than 6 TDs): {tr.get_text()}", level="WARNING")
 
-        if not grades_list:
+        # --- Process raw grades to keep only the latest date for each unique (subject, year, semester) ---
+        processed_grades = {} # Key: (subject, year, semester), Value: latest grade entry
+        for grade_entry in raw_grades_list:
+            key = (grade_entry['subject'], grade_entry['year'], grade_entry['semester'])
+            current_date_str = grade_entry['date']
+            current_date = datetime.strptime(current_date_str, '%d/%m/%Y')
+
+            if key not in processed_grades:
+                processed_grades[key] = grade_entry
+            else:
+                # Compare dates if an entry for this key already exists
+                existing_date_str = processed_grades[key]['date']
+                existing_date = datetime.strptime(existing_date_str, '%d/%m/%Y')
+
+                if current_date > existing_date:
+                    processed_grades[key] = grade_entry # Keep the newer entry
+                # Optional: If dates are equal, but one is a numerical grade and other is Absent/Necules, prioritize numerical.
+                # This adds complexity but might be desired. For now, latest date wins.
+        # --- End processing raw grades ---
+
+        final_grades_list = list(processed_grades.values())
+
+        if not final_grades_list:
             log_message("No grades found after parsing. The HTML structure might have changed or parsing logic needs adjustment.", level="WARNING")
-        return grades_list
+        return final_grades_list
 
     except requests.exceptions.RequestException as e:
         log_message(f"A network or HTTP error occurred while fetching or posting grades: {e}", level="ERROR")
@@ -272,7 +279,8 @@ def save_current_grades(user_identifier, grades):
 def compare_grades(old_grades, new_grades):
     """
     Compares old and new grade lists to find new or changed grades.
-    Assumes each grade can be uniquely identified by subject, year, and semester.
+    Assumes each grade can be uniquely identified by subject, year, and semester
+    (after being filtered to the latest date in get_grades).
     """
     new_grade_entries = []
     changed_grade_entries = []
@@ -294,7 +302,7 @@ def compare_grades(old_grades, new_grades):
                 'subject': new_grade['subject'],
                 'year': new_grade['year'],
                 'semester': new_grade['semester'],
-                'date': new_grade['date']
+                'date': new_grade['date'] # Date reflects the new grade's date
             })
     
     return new_grade_entries, changed_grade_entries
@@ -307,7 +315,7 @@ if __name__ == "__main__":
     current_dir = os.getcwd()
     log_message(f"Current working directory: {current_dir}", level="DEBUG")
 
-    #! Define a list of GENERIC user identifiers/nicknames.
+    # Define a list of GENERIC user identifiers/nicknames.
     USER_IDENTIFIERS = ["STUDENT_A", "STUDENT_B"] # Example: replace with generic names if sharing
 
     # Get the GLOBAL Ntfy topic URL once (from the .env file)
@@ -317,11 +325,7 @@ if __name__ == "__main__":
         log_message("CRITICAL ERROR: NTFY_TOPIC_URL not found in .env. Agent cannot send notifications. Please add NTFY_TOPIC_URL='your_ntfy_topic_url' to your .env file.", level="CRITICAL")
         exit(1) # Exit with an error code
 
-    # Removed: Initial "Agent started" notification
-    # send_ntfy_notification(global_ntfy_topic_url, "WebSinu Grades agent started!", title="Agent Status", tags=["robot"])
-
-
-    # Iterate through each user
+    # Loop for all users
     for user_identifier in USER_IDENTIFIERS:
         log_message(f"\n--- Processing grades for user: '{user_identifier}' ---", level="INFO")
 
@@ -342,11 +346,7 @@ if __name__ == "__main__":
                 tags=["error", "x"]
             )
             continue
-        # Removed: Ntfy URL check here, as it's handled globally at the start
         else:
-            # Removed: Per-user "Agent started checking" notification
-            # send_ntfy_notification(global_ntfy_topic_url, f"Agent started checking for user '{user_identifier}'.", title="Agent Status", tags=["robot", "sync"])
-
             # Load previous grades specific to this user identifier
             previous_grades = load_previous_grades(user_identifier)
 
@@ -374,17 +374,14 @@ if __name__ == "__main__":
                                 send_ntfy_notification(global_ntfy_topic_url, msg, title=f"WebSinu Grade Changed for {user_identifier}!", tags=["changed", "warning"])
                                 log_message(f"Notified: {msg}", level="INFO")
 
-                        # Removed: "No new or changed grades found" notification
-                        # if not new_entries and not changed_entries:
-                        #     log_message(f"No new or changed grades found for user '{user_identifier}'.", level="INFO")
-                        #     send_ntfy_notification(global_ntfy_topic_url, f"No new grades found for {user_identifier}. All good.", tags=["check"])
+                        # If no changes were found, no notification is sent (as per your request)
+                        if not new_entries and not changed_entries:
+                            log_message(f"No new or changed grades found for user '{user_identifier}'. Skipping notification.", level="INFO")
 
                     else:
-                        # Modified: First run notification to be less noisy and not say "found X grades" as a notification
                         log_message(f"First run or no previous grades found for user '{user_identifier}'. Grades will be saved for future comparison.", level="INFO")
-                        # Removed: First run completion notification
-                        # send_ntfy_notification(global_ntfy_topic_url, f"First grade check completed for {user_identifier}. Found {len(current_grades)} grades. Will notify on changes.", tags=["info"])
-
+                        # No notification for the first run, as it's not a 'change'
+                        
                     save_current_grades(user_identifier, current_grades)
 
                 else:
@@ -399,6 +396,5 @@ if __name__ == "__main__":
             log_message(f"Pausing for {DELAY_BETWEEN_USERS_SECONDS} seconds before next user...", level="INFO")
             time.sleep(DELAY_BETWEEN_USERS_SECONDS)
 
-    # Removed: Final "All checks completed" notification
-    # log_message("\n--- All user grade checks completed ---", level="INFO")
-    # send_ntfy_notification(global_ntfy_topic_url, "All WebSinu grade checks completed!", title="Agent Batch Complete", tags=["checkmark", "bell"])
+    log_message("\n--- All user grade checks completed ---", level="INFO")
+    # No final "batch complete" notification, as per your request
