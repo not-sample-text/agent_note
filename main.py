@@ -307,10 +307,7 @@ if __name__ == "__main__":
     current_dir = os.getcwd()
     log_message(f"Current working directory: {current_dir}", level="DEBUG")
 
-    # Define a list of GENERIC user identifiers/nicknames.
-    # These will be used as prefixes in your .env file and in log/notification messages.
-    # IMPORTANT: When sharing, use generic placeholders here (e.g., "STUDENT_A", "USER_B").
-    # NOT in the script you commit to GitHub.
+    #! Define a list of GENERIC user identifiers/nicknames.
     USER_IDENTIFIERS = ["STUDENT_A", "STUDENT_B"] # Example: replace with generic names if sharing
 
     # Get the GLOBAL Ntfy topic URL once (from the .env file)
@@ -320,8 +317,8 @@ if __name__ == "__main__":
         log_message("CRITICAL ERROR: NTFY_TOPIC_URL not found in .env. Agent cannot send notifications. Please add NTFY_TOPIC_URL='your_ntfy_topic_url' to your .env file.", level="CRITICAL")
         exit(1) # Exit with an error code
 
-    log_message(f"NTFY_TOPIC_URL loaded: {'Yes' if global_ntfy_topic_url else 'No'}", level="DEBUG")
-    send_ntfy_notification(global_ntfy_topic_url, "WebSinu Grades agent started!", title="Agent Status", tags=["robot"])
+    # Removed: Initial "Agent started" notification
+    # send_ntfy_notification(global_ntfy_topic_url, "WebSinu Grades agent started!", title="Agent Status", tags=["robot"])
 
 
     # Iterate through each user
@@ -345,8 +342,10 @@ if __name__ == "__main__":
                 tags=["error", "x"]
             )
             continue
+        # Removed: Ntfy URL check here, as it's handled globally at the start
         else:
-            send_ntfy_notification(global_ntfy_topic_url, f"Agent started checking for user '{user_identifier}'.", title="Agent Status", tags=["robot", "sync"])
+            # Removed: Per-user "Agent started checking" notification
+            # send_ntfy_notification(global_ntfy_topic_url, f"Agent started checking for user '{user_identifier}'.", title="Agent Status", tags=["robot", "sync"])
 
             # Load previous grades specific to this user identifier
             previous_grades = load_previous_grades(user_identifier)
@@ -365,25 +364,26 @@ if __name__ == "__main__":
 
                         if new_entries:
                             for entry in new_entries:
-                                # Custom notification message style: <user_identifier>'s new grade for <class> is: <grade>
                                 msg = f"New grade for {user_identifier}: {entry['subject']} is {entry['grade']} (on {entry['date']})"
                                 send_ntfy_notification(global_ntfy_topic_url, msg, title=f"New WebSinu Grade for {user_identifier}!", tags=["new", "sparkles"])
                                 log_message(f"Notified: {msg}", level="INFO")
                         
                         if changed_entries:
                             for entry in changed_entries:
-                                # Custom notification message style: <user_identifier>'s grade for <class> changed from <old_grade> to <new_grade>
                                 msg = f"Grade for {user_identifier}: {entry['subject']} changed from {entry['old_grade']} to {entry['new_grade']} (on {entry['date']})"
                                 send_ntfy_notification(global_ntfy_topic_url, msg, title=f"WebSinu Grade Changed for {user_identifier}!", tags=["changed", "warning"])
                                 log_message(f"Notified: {msg}", level="INFO")
 
-                        if not new_entries and not changed_entries:
-                            log_message(f"No new or changed grades found for user '{user_identifier}'.", level="INFO")
-                            send_ntfy_notification(global_ntfy_topic_url, f"No new grades found for {user_identifier}. All good.", tags=["check"])
+                        # Removed: "No new or changed grades found" notification
+                        # if not new_entries and not changed_entries:
+                        #     log_message(f"No new or changed grades found for user '{user_identifier}'.", level="INFO")
+                        #     send_ntfy_notification(global_ntfy_topic_url, f"No new grades found for {user_identifier}. All good.", tags=["check"])
 
                     else:
-                        log_message(f"First run or no previous grades found for user '{user_identifier}'. Not comparing, just saving current grades.", level="INFO")
-                        send_ntfy_notification(global_ntfy_topic_url, f"First grade check completed for {user_identifier}. Found {len(current_grades)} grades. Will notify on changes.", tags=["info"])
+                        # Modified: First run notification to be less noisy and not say "found X grades" as a notification
+                        log_message(f"First run or no previous grades found for user '{user_identifier}'. Grades will be saved for future comparison.", level="INFO")
+                        # Removed: First run completion notification
+                        # send_ntfy_notification(global_ntfy_topic_url, f"First grade check completed for {user_identifier}. Found {len(current_grades)} grades. Will notify on changes.", tags=["info"])
 
                     save_current_grades(user_identifier, current_grades)
 
@@ -399,5 +399,6 @@ if __name__ == "__main__":
             log_message(f"Pausing for {DELAY_BETWEEN_USERS_SECONDS} seconds before next user...", level="INFO")
             time.sleep(DELAY_BETWEEN_USERS_SECONDS)
 
-    log_message("\n--- All user grade checks completed ---", level="INFO")
-    send_ntfy_notification(global_ntfy_topic_url, "All WebSinu grade checks completed!", title="Agent Batch Complete", tags=["checkmark", "bell"])
+    # Removed: Final "All checks completed" notification
+    # log_message("\n--- All user grade checks completed ---", level="INFO")
+    # send_ntfy_notification(global_ntfy_topic_url, "All WebSinu grade checks completed!", title="Agent Batch Complete", tags=["checkmark", "bell"])
