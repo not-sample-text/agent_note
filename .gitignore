@@ -1,0 +1,16 @@
+# Environment variables
+.env
+# or more specific if you used .env.user1 etc. but generally .env* is good
+# .env.*
+
+# Previous grades data
+previous_grades_*.json
+
+# Log files
+*.log
+
+# Python cache and dependencies
+__pycache__/
+*.pyc
+venv/
+.venv/
